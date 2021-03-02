@@ -17,8 +17,7 @@
       "typescript": "^3.8.3"
    },
    "dependencies": {
-      "parcel-plugin-glsl": "^0.1.0",
-      "picogl": "^0.17.7",
+      "regl": "^2.1.0",
       "rxjs": "^7.0.0-beta.0",
       "seedrandom": "^3.0.5"
    }

@@ -1,11 +1,14 @@
-import { PicoGL } from 'picogl'
-import { animationFrameScheduler } from 'rxjs'
-import { default as seedrandom } from 'seedrandom'
+import { default as Regl } from 'regl'
+import { seedrandom } from './lib/seedrandom'
 import { init } from './page/init'
 import { getContextWebGl2 } from './util/getContext'
 import { spacelessURL } from './util/urlParam'
 
-let glsl = (content: TemplateStringsArray) => content.join('')
+let glsl = (content: TemplateStringsArray, ...args: unknown[]) => {
+   let partList = [content[0]]
+   content.slice(1).forEach((v, k) => partList.push('' + args[k], v))
+   return partList.join('')
+}
 
 export let main = async () => {
    spacelessURL(location)
@@ -14,118 +17,95 @@ export let main = async () => {
 
    let random = seedrandom(config.seed)
 
-   let { gl } = getContextWebGl2(canvas)
-
-   let line = Array.from({ length: canvas.width }, () => (2 * random()) & 1)
-
-   // PROGRAM
-   let vertexShaderSource = glsl`
-      #version 300 es
-
-      layout(location=0) in vec4 position;
-      layout(location=1) in vec3 color;
-
-      out vec3 vColor;
-      void main() {
-         vColor = color;
-         gl_Position = position;
-      }
-   `
-
-   let fragmentShaderSource = glsl`
-      #version 300 es
-      precision highp float;
-
-      in vec3 vColor;
-
-      out vec4 fragColor;
-      void main() {
-         fragColor = vec4(vColor, 1.0);
-      }
-   `
-
-   let app = PicoGL.createApp(canvas).clearColor(0.0, 0.0, 0.0, 1.0)
-
    screenSize.attach(({ y, x }) => {
-      app.resize(x - 0.5, y - 0.5)
+      canvas.width = x - 0.5
+      canvas.height = y - 0.5
    })
 
-   let [a, b, c, d]: [number, number][] = [
-      // [y, x]
-      [-0.9, -0.9], // bottom left corner
-      [0.9, -0.9], // bottom right corner
-      [-0.9, 0.9], // top left corner
-      [0.9, 0.9], // top right corner
-   ]
+   let { gl } = getContextWebGl2(canvas)
 
-   let color = {
-      black: [0, 0, 0],
-      red: [255, 0, 0],
-      green: [0, 255, 0],
-      blue: [0, 0, 255],
-      cyan: [0, 255, 255],
-      magenta: [255, 0, 255],
-      yellow: [255, 255, 0],
-      white: [255, 255, 255],
+   let texture_side = 1
+   while (texture_side < config.width) {
+      texture_side *= 2
    }
+   let initial_conditions = Array(texture_side * texture_side * 4)
+      .fill(0)
+      .map(() => (random() > 0.95 ? 255 : 0))
 
-   // GEOMETRY IN VERTEX BUFFERS
-   let positions = app.createVertexBuffer(
-      PicoGL.FLOAT,
-      2,
-      new Float32Array([
-         ...a,
-         ...b,
-         ...c, //
-         ...d, //
-         ...b,
-         ...c,
-      ]),
-   )
+   let regl = Regl(gl)
 
-   let colors = app.createVertexBuffer(
-      PicoGL.UNSIGNED_BYTE,
-      3,
-      new Uint8Array([
-         ...color.red,
-         ...color.green,
-         ...color.blue, //
-         ...color.cyan, //
-         ...color.magenta,
-         ...color.yellow,
-      ]),
-   )
+   let state = Array(2)
+      .fill(0)
+      .map(() =>
+         regl.framebuffer({
+            color: regl.texture({
+               radius: texture_side,
+               data: initial_conditions,
+               wrap: 'repeat',
+            }),
+            depthStencil: false,
+         }),
+      )
 
-   // COMBINE VERTEX BUFFERS INTO VERTEX ARRAY
-   let triangleArray = app
-      .createVertexArray()
-      .vertexAttributeBuffer(0, positions)
-      .vertexAttributeBuffer(1, colors, { normalized: 1 })
+   let updateLife = regl({
+      frag: glsl`
+         precision mediump float;
+         uniform sampler2D prevState;
+         varying vec2 uv;
+         void main() {
+            float n = 0.0;
+            for(int dx=-1; dx<=1; ++dx) {
+               for(int dy=-1; dy<=1; ++dy) {
+                  n += texture2D(prevState, uv+vec2(dx,dy)/float(${texture_side})).r;
+               }
+            }
+            float s = texture2D(prevState, uv).r;
+            if(n > 3.0+s || n < 3.0) {
+               gl_FragColor = vec4(0,0,0,1);
+            } else {
+               gl_FragColor = vec4(1,1,1,1);
+            }
+         }`,
 
-   let [program] = await app.createPrograms([vertexShaderSource, fragmentShaderSource])
+      framebuffer: ({ tick }) => state[(tick + 1) % 2],
+   })
 
-   // CREATE DRAW CALL FROM PROGRAM AND VERTEX ARRAY
-   let drawCall = app.createDrawCall(program, triangleArray)
+   let setupQuad = regl({
+      frag: glsl`
+         precision mediump float;
+         uniform sampler2D prevState;
+         varying vec2 uv;
+         void main() {
+            float state = texture2D(prevState, uv).r;
+            gl_FragColor = vec4(vec3(state), 1);
+         }`,
 
-   // DRAW
-   let draw = () => {
-      app.clear()
-      drawCall.draw()
-   }
+      vert: glsl`
+         precision mediump float;
+         attribute vec2 position;
+         varying vec2 uv;
+         void main() {
+            uv = 0.5 * (position + 1.0);
+            gl_Position = vec4(position, 0, 1);
+         }`,
 
-   screenSize.attach(draw)
+      attributes: {
+         position: [-4, -4, 4, -4, 0, 4],
+      },
 
-   console.log({ glcheck_renderDone: true })
+      uniforms: {
+         prevState: ({ tick }) => state[tick % 2],
+      },
 
-   let cleanup = () => {
-      // Note: cleanup only when deleting the canvas
+      depth: { enable: false },
 
-      // WebGl
-      program.delete()
-      positions.delete()
-      colors.delete()
-      triangleArray.delete()
-   }
+      count: 3,
+   })
 
-   // animationFrameScheduler.schedule(() => {})
+   regl.frame(() => {
+      setupQuad(() => {
+         regl.draw()
+         updateLife()
+      })
+   })
 }

@@ -1,4 +1,4 @@
-import { default as Regl } from 'regl'
+import { default as createRegl } from 'regl'
 import { seedrandom } from './lib/seedrandom'
 import { init } from './page/init'
 import { getContextWebGl2 } from './util/getContext'
@@ -30,9 +30,9 @@ export let main = async () => {
    }
    let initial_conditions = Array(texture_side * texture_side * 4)
       .fill(0)
-      .map(() => (random() > 0.95 ? 255 : 0))
+      .map(() => (random.quick() > 0.95 ? 255 : 0))
 
-   let regl = Regl(gl)
+   let regl = createRegl(gl)
 
    let state = Array(2)
       .fill(0)
@@ -47,7 +47,7 @@ export let main = async () => {
          }),
       )
 
-   let updateLife = regl({
+   let updateUniverse = regl({
       frag: glsl`
          precision mediump float;
          uniform sampler2D prevState;
@@ -105,7 +105,7 @@ export let main = async () => {
    regl.frame(() => {
       setupQuad(() => {
          regl.draw()
-         updateLife()
+         updateUniverse()
       })
    })
 }

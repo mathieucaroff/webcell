@@ -6,7 +6,7 @@ import { WebcellConfig } from '../type/webcellConfig'
 import { createNoisyStateWithObservable } from '../util/noisyState'
 import { randomSeed } from '../util/randomSeed'
 import { getUrlParam } from '../util/urlParam'
-import { h } from './lib/hyper'
+import { h } from '../lib/hyper'
 
 interface InitProp {
    document: Document
